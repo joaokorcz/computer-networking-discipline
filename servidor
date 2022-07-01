@@ -10,20 +10,230 @@ def validar_nome(nome):
 
 def sair(conexao):
     print(conexao, 'conexão fechada')
+    if hasattr(conexao,'canais'):
+        ferdinandinhos = conexao.canais
+        for canal in ferdinandinhos:
+            for user in canais[canal]:
+                if user != conexao.nome.lower():
+                    conexao_aux = apelidos[user.lower()]
+                    conexao_aux.enviar(b':%s QUIT :Connection closed\r\n' % conexao.nome)
+            canais[canal].remove(conexao.nome.lower())
+            conexao.canais.remove(canal.lower())
+    if hasattr(conexao,'nome'):
+        del apelidos[conexao.nome.lower()]
     conexao.fechar()
+
+def tira_r(msg):
+    #Substitui o \n e o \r na mensagem, exclusivo para a passagem nos testes
+    return msg.replace(b'\n',b'').replace(b'\r',b'')
+
+
+def trata_dados(conexao,dados):
+    
+    #Verifica se tem algum tipo de residuo na conexao
+    tem_residuo = hasattr(conexao,'dados_residuais')
+
+    #Caso 1: Não tem \n na string enviada. Por exemplo: "PING\r"
+    if not b'\n' in dados:
+
+        #Caso 1.1: Nao continha nenhum residuo guardado
+        if not tem_residuo:
+            conexao.dados_residuais = dados
+        
+        #Caso 1.2: Tinha residuos na memória
+        else:
+            conexao.dados_residuais = conexao.dados_residuais + dados
+
+        #Retorno
+        return
+    
+    #Caso 2: Tem \n na string, mas não é no final. Por exemplo: "PING\r\nPING"
+    elif dados[-1] != b'\n':
+
+        #Divide nos \n. No caso da string acima: ["PING\r","PING"]
+        dividido = dados.split(b'\n') 
+
+        #Caso a conexão já tivesse residuos
+        if tem_residuo:
+
+            #Armazena os residuos em uma nova variável, visto que um comando chegou ao fim (presença do \n)
+            residuos_atuais = conexao.dados_residuais
+        
+        #Atribui um novo comando aos dados residuais da conexão
+        conexao.dados_residuais = dividido[-1]
+
+        #Se tiver residuos, um comando acabou, dessa forma precisa ser enviada
+        if tem_residuo:
+            residuos_atuais = (residuos_atuais + b'\n'.join(dados.split(b'\n')[:-1])).split(b'\n')
+            return residuos_atuais
+
+        #Caso não tenha mais residuo
+        else:
+            return dividido[:-1]
+    
+    #Caso 3: Caso o \n esteja no final
+    else:
+
+        #Caso 3.1:
+        if tem_residuo:
+            residuos_retorno = (conexao.dados_residuais + b'\n'.join(dados.split(b'\n')[:-1])).split(b'\n')
+            return residuos_retorno
+
+        #Caso 3.2:
+        else:
+            residuos_retorno = dados.split(b'\n')[:-1]
+            return dados.split(b'\n')[:-1]
+
+def aviso_canal(canal, cmd, nome):
+    for user in canais[canal]:
+        conexao = apelidos[user]
+        mensagem = b':' + nome + b' ' + cmd + canal + b'\r\n'
+        conexao.enviar(mensagem)
+
+def mensagens_canal(canal, texto, remetente):
+    for user in canais[canal]:
+        conexao = apelidos[user]
+        if remetente.lower() != user.lower():
+            mensagem = b':' + remetente + b' PRIVMSG ' + canal + b' ' + texto + b'\r\n'
+            conexao.enviar(mensagem)
+
+def listagem_canal(canal, conexao):
+    mensagem = b':server 353 ' + conexao.nome + b' = ' + canal + b' :' + b' '.join(sorted(canais[canal]))
+    mensagem = mensagem + b'\r\n'
+    conexao.enviar(mensagem)
+    conexao.enviar(b':server 366 %s %s :End of /NAMES list.\r\n' % (conexao.nome, canal))
+
+def executar_comandos(conexao,comando):
+    #Divide o comando da mensagem
+    comando = tira_r(comando)
+    dividir_comando = comando.split(b' ')
+
+    #Pega o comando enviado
+    c =  dividir_comando[0]
+
+    #Comando PING
+    if c == b'PING':
+        #Pega a mensagem do comando
+        msg = comando.split(b' ',1)[1]
+
+        #Envia mensagem para o usuário
+        conexao.enviar(b':server PONG server :'+ msg + b'\r\n')
+
+        return
+    
+    #Comando NICK
+    elif c == b'NICK':
+        #Pega o nome 
+        nome = comando.split(b' ',1)[1] #pega o nome 
+        nome = tira_r(nome)
+        #Caso 1: O novo nome já está no servidor
+        if nome.lower() in apelidos:
+
+            #Caso 1.1: O usuário é novo no servidor e não tem um nome
+            if not hasattr(conexao,'nome'):
+                conexao.enviar(b':server 433 * %s :Nickname is already in use\r\n' % (nome))
+
+            #Caso 1.2: O usuário já tem um nome, e deseja trocá-lo
+            else:
+                conexao.enviar(b':server 433 %s %s :Nickname is already in use\r\n' % (conexao.nome, nome))
+        
+        #Caso 2: O usuário informou um nome que não está no servidor, e agora deve-se verificá-lo
+        elif validar_nome(nome):
+            #Caso 2.1: Este usuário ainda não tem nome, assim deve-se registrá-lo no servidor
+            if not hasattr(conexao,'nome'):
+                apelidos[nome.lower()] = conexao
+                conexao.enviar(b':server 001 %s :Welcome\r\n' % (nome))
+                conexao.enviar(b':server 422 %s :MOTD File is missing\r\n' % (nome))
+                conexao.canais = []
+ 
+            #Caso 2.2: O usuário informou um nome válido para troca, e então troca o antigo nome pelo novo
+            else:
+                nome_antigo = conexao.nome
+                nome_novo = nome.lower()
+                apelidos[nome_novo] = conexao
+                conexao.enviar(b':%s NICK %s\r\n' % (nome_antigo, nome))
+                for canal in canais:
+                    if nome_antigo.lower() in canais[canal]:
+                        canais[canal].remove(nome_antigo.lower())
+                        canais[canal].append(nome_novo)
+                del apelidos[nome_antigo.lower()]
+            conexao.nome = nome
+
+        
+        #Caso 3: O nome informado pelo usuário não está no servidor, mas é invalido
+        else:
+            #Caso 3.1: O usuário não tem nome no servidor ainda
+            if not hasattr(conexao, 'nome'):
+                conexao.enviar(b':server 432 * %s :Erroneous nickname\r\n' % (nome))
+            
+            #Caso 3.2: O usuário já tem nome no servidor, e tentou trocá-lo
+            else:
+                conexao.enviar(b':server 432 %s %s :Erroneous nickname\r\n' % (conexao.nome, nome))
+    elif c == b'PRIVMSG':
+        # PRIVMSG destinatário :conteúdo
+        _, destinatario, conteudo = comando.split(b' ')
+        remetente = b':' + conexao.nome
+        if destinatario.startswith(b'#'):
+            if destinatario.lower() in canais and conexao.nome.lower() in canais[destinatario.lower()]:
+                mensagens_canal(destinatario.lower(), conteudo, conexao.nome)
+        elif destinatario.lower() in apelidos:
+            mensagem = remetente + b' PRIVMSG ' + destinatario + b' ' + conteudo + b'\r\n'
+            apelidos[destinatario.lower()].enviar(mensagem)
+    elif c == b'JOIN':
+        canal = comando.split(b' ', 1)[1]
+        if not canal.startswith(b'#') or not validar_nome(canal[1:]):
+            conexao.enviar(b':server 403 canal :No such channel\r\n')
+            return
+        if canal.lower() in conexao.canais:
+            return
+        if canal.lower() not in canais:
+            canais[canal.lower()] = [conexao.nome.lower()]
+            conexao.canais.append(canal.lower())
+        elif canal.lower() not in conexao.canais:
+            canais[canal.lower()].append(conexao.nome.lower())
+            conexao.canais.append(canal.lower())
+        aviso_canal(canal.lower(), b'JOIN :', conexao.nome)
+        listagem_canal(canal.lower(),conexao)
+        
+    elif c == b'PART':
+        canal = (comando.split(b' ')[1]).lower()
+        if canal in canais and conexao.nome.lower() in canais[canal]:
+            aviso_canal(canal, b'PART ', conexao.nome)
+            canais[canal].remove(conexao.nome.lower())
+            conexao.canais.remove(canal)
+            
+    #Retorno         
+    return
+                
+def executar_lista_comandos(conexao,lista_comandos):
+    if lista_comandos == None:
+        return
+    for comando in lista_comandos:
+        executar_comandos(conexao,comando)
 
 
 def dados_recebidos(conexao, dados):
-    if dados == b'':
+    if dados == b'' or dados == b'sair\n':
         return sair(conexao)
-    print(conexao, dados)
+
+    #Tratamento - Passo 2
+    lista_comandos = trata_dados(conexao,dados)
+
+    executar_lista_comandos(conexao,lista_comandos)
+    
+    
+
+    
+
 
 
 def conexao_aceita(conexao):
     print(conexao, 'nova conexão')
     conexao.registrar_recebedor(dados_recebidos)
 
-
-servidor = Servidor(6667)
+canais = {}
+apelidos = {}
+porta = 6667
+servidor = Servidor(porta)
 servidor.registrar_monitor_de_conexoes_aceitas(conexao_aceita)
 asyncio.get_event_loop().run_forever()
