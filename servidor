@@ -233,7 +233,7 @@ def conexao_aceita(conexao):
 
 canais = {}
 apelidos = {}
-porta = 12345
+porta = 6667
 servidor = Servidor(porta)
 servidor.registrar_monitor_de_conexoes_aceitas(conexao_aceita)
 asyncio.get_event_loop().run_forever()
