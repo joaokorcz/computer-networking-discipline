@@ -81,8 +81,7 @@ class Conexao:
         ## vai chamar `reenvia` com frequencia TIMAO ms
         if self.timer is not None:
             self.timer.cancel() 
-        else:
-            self.timer = asyncio.get_event_loop().call_later(self.intervalo_timeout, self.reenvia)
+        self.timer = asyncio.get_event_loop().call_later(self.intervalo_timeout, self.reenvia)
 
     def reenvia(self):
         print('Chamou `reenvia`')
