@@ -1,8 +1,11 @@
 import asyncio
 from tcputils import *
 import random
+import time
 
-TIMAO = 1
+TIMAO = 0.3
+ALPHA = 0.125
+BETA = 0.250
 
 class Servidor:
     def __init__(self, rede, porta):
@@ -69,17 +72,34 @@ class Conexao:
         #self.timer = None
         self.content = b''
         self.fernandolas = b''
+        self.tempos = {}
+        self.rtt_estimado = None
+        self.rtt_desviado = None
+        self.intervalo_timeout = TIMAO
 
     def intercala_timer(self):
-        ## vai chamar `executa_timer` com frequencia TIMAO ms
+        ## vai chamar `reenvia` com frequencia TIMAO ms
         if self.timer is not None:
-            self.timer.cancel()
-            self.timer = None
+            self.timer.cancel() 
         else:
-            self.timer = asyncio.get_event_loop().call_later(TIMAO, self.executa_timer)
+            self.timer = asyncio.get_event_loop().call_later(self.intervalo_timeout, self.reenvia)
 
-    def executa_timer(self):
-        print('Chamou `executa_timer`')
+    def reenvia(self):
+        print('Chamou `reenvia`')
+
+        endereco_destino, porta_destino, endereco_fonte, porta_fonte = self.id_conexao
+        dados = self.fernandolas[:MSS]
+
+        header = make_header(porta_destino, porta_fonte, self.ack_atual, self.seq_esperado, FLAGS_ACK)
+        header = fix_checksum(header + dados, endereco_fonte, endereco_destino)
+        print('vai enviar')
+        self.servidor.rede.enviar(header, endereco_destino)
+
+        carlinhos = self.ack_atual + len(dados)
+        if carlinhos in self.tempos:
+            del self.tempos[carlinhos]
+
+        self.intercala_timer()
 
     def _rdt_rcv(self, seq_no, ack_no, flags, payload):
         endereco_destino, porta_destino, endereco_fonte, porta_fonte = self.id_conexao
@@ -108,6 +128,19 @@ class Conexao:
                 if ack_no > self.ack_atual:
                     self.fernandolas = self.fernandolas[(ack_no - self.ack_atual):]
                     self.ack_atual = ack_no
+
+                    if ack_no in self.tempos:
+                        rtt = time.time() - self.tempos[ack_no]
+                        print('dif', rtt)
+                        if self.rtt_estimado is not None and self.rtt_desviado is not None:
+                            self.rtt_estimado = (1-ALPHA) * self.rtt_estimado + ALPHA * rtt
+                            self.rtt_desviado = (1-BETA) * self.rtt_desviado + BETA * abs(rtt - self.rtt_estimado)
+                            self.intervalo_timeout = self.rtt_estimado + 4 * self.rtt_desviado
+
+                        else:
+                            self.rtt_estimado = rtt
+                            self.rtt_desviado = rtt / 2
+                            self.intervalo_timeout = self.rtt_estimado + 4 * self.rtt_desviado
                 
                 self.enviar2()
 
@@ -146,6 +179,8 @@ class Conexao:
         header = make_header(porta_destino, porta_fonte, self.ack_atual + len(self.fernandolas), self.seq_esperado, FLAGS_ACK)
         self.fernandolas += jegue
         header = fix_checksum(header + jegue, endereco_fonte, endereco_destino)
+
+        self.tempos[self.ack_atual + len(self.fernandolas)] = time.time()
 
         self.servidor.rede.enviar(header, endereco_destino)
 
