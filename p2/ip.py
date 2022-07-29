@@ -46,5 +46,4 @@ class IP:
         Envia segmento para dest_addr, onde dest_addr é um endereço IPv4
         fornecido como string (no formato x.y.z.w).
         """
-        print("hehe")
         self.fd.sendto(segmento, (dest_addr, 0))
