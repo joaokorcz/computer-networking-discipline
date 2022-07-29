@@ -76,6 +76,9 @@ class Conexao:
         self.rtt_estimado = None
         self.rtt_desviado = None
         self.intervalo_timeout = TIMAO
+        self.cwnd = 1
+        self.ultimo_ack_janela = ack_atual + MSS
+        self.min_tam_janela = 1
 
     def intercala_timer(self):
         ## vai chamar `reenvia` com frequencia TIMAO ms
@@ -93,6 +96,15 @@ class Conexao:
         header = fix_checksum(header + dados, endereco_fonte, endereco_destino)
         print('vai enviar')
         self.servidor.rede.enviar(header, endereco_destino)
+
+        # O ack da janela deve ser dimminuido, caso haja necessidade de retransmissão
+        self.ultimo_ack_janela -= (self.cwnd//2) * MSS
+
+        #RightShift do  tamanho da janela comparado com o tamanho mínimo da janela
+        if self.cwnd > 2:
+            self.cwnd = self.cwnd//2
+        else:
+            self.cwnd = self.min_tam_janela
 
         carlinhos = self.ack_atual + len(dados)
         if carlinhos in self.tempos:
@@ -123,7 +135,11 @@ class Conexao:
 
                     if self.callback:
                         self.callback(self, payload)
-
+                
+                #Aumenta tamanho da janela. Caso o número de ack seja maior que o ack da janela, deve aumentar o ack
+                if ack_no >= self.ultimo_ack_janela:
+                    self.cwnd += 1
+                
                 if ack_no > self.ack_atual:
                     self.fernandolas = self.fernandolas[(ack_no - self.ack_atual):]
                     self.ack_atual = ack_no
@@ -166,22 +182,34 @@ class Conexao:
         self.enviar2()
 
     def enviar2(self):
-        endereco_destino, porta_destino, endereco_fonte, porta_fonte = self.id_conexao
+        
+        """Nessa etapa, para enviar, caso não caiba na janela, deve-se enviar os dados separados, ou seja, envia uma parte por um header, e dps envia novamente 
+        outro header com o restante da mensagem. O ultimo ack da janela seria o ack atual, após o envio da mensagem somado com o fernandolas( kkkkkk)
+        """
+        qntd_bytes = len(self.fernandolas)
 
-        jegue = self.content[:MSS]
+        while qntd_bytes < self.cwnd * MSS:
+            endereco_destino, porta_destino, endereco_fonte, porta_fonte = self.id_conexao
 
-        if len(jegue) == 0:
-            return
+            jegue = self.content[:MSS]
             
-        self.content = self.content[MSS:]
+            qntd_bytes += len(jegue)
+            if len(jegue) == 0:
+                break
 
-        header = make_header(porta_destino, porta_fonte, self.ack_atual + len(self.fernandolas), self.seq_esperado, FLAGS_ACK)
-        self.fernandolas += jegue
-        header = fix_checksum(header + jegue, endereco_fonte, endereco_destino)
+            self.content = self.content[MSS:]
 
-        self.tempos[self.ack_atual + len(self.fernandolas)] = time.time()
+            header = make_header(porta_destino, porta_fonte, self.ack_atual + len(self.fernandolas), self.seq_esperado, FLAGS_ACK)
 
-        self.servidor.rede.enviar(header, endereco_destino)
+            self.fernandolas += jegue
+
+            header = fix_checksum(header + jegue, endereco_fonte, endereco_destino)
+
+            self.tempos[self.ack_atual + len(self.fernandolas)] = time.time()
+
+            self.servidor.rede.enviar(header, endereco_destino)
+
+            self.ultimo_ack_janela = self.ack_atual+len(self.fernandolas)
 
         self.intercala_timer()
 
