@@ -2,7 +2,9 @@
 import asyncio
 from tcp import Servidor
 import re
-
+from camadafisica import PTY
+from ip import IP  # copie o arquivo do Trabalho 3
+from slip import CamadaEnlace
 
 def validar_nome(nome):
     return re.match(br'^[a-zA-Z][a-zA-Z0-9_-]*$', nome) is not None
@@ -220,20 +222,32 @@ def dados_recebidos(conexao, dados):
     lista_comandos = trata_dados(conexao,dados)
 
     executar_lista_comandos(conexao,lista_comandos)
-    
-    
-
-    
-
-
 
 def conexao_aceita(conexao):
     print(conexao, 'nova conexão')
     conexao.registrar_recebedor(dados_recebidos)
 
+linha_serial = PTY()
+outra_ponta = '200.136.192.1'
+nossa_ponta = '200.136.192.2'
+
+print('Para conectar a outra ponta da camada física, execute:')
+print('  sudo slattach -v -p slip {}'.format(linha_serial.pty_name))
+print('  sudo ifconfig sl0 {} pointopoint {}'.format(outra_ponta, nossa_ponta))
+print()
+print('O serviço ficará acessível no endereço {}'.format(nossa_ponta))
+print()
+
+enlace = CamadaEnlace({outra_ponta: linha_serial})
+rede = IP(enlace)
+rede.definir_endereco_host(nossa_ponta)
+rede.definir_tabela_encaminhamento([
+    ('0.0.0.0/0', outra_ponta)
+])
+
 canais = {}
 apelidos = {}
 porta = 6667
-servidor = Servidor(porta)
+servidor = Servidor(rede, porta)
 servidor.registrar_monitor_de_conexoes_aceitas(conexao_aceita)
 asyncio.get_event_loop().run_forever()
