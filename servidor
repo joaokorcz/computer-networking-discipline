@@ -173,7 +173,7 @@ def executar_comandos(conexao,comando):
                 conexao.enviar(b':server 432 %s %s :Erroneous nickname\r\n' % (conexao.nome, nome))
     elif c == b'PRIVMSG':
         # PRIVMSG destinatário :conteúdo
-        _, destinatario, conteudo = comando.split(b' ')
+        _, destinatario, conteudo = comando.split(b' ', 2)
         remetente = b':' + conexao.nome
         if destinatario.startswith(b'#'):
             if destinatario.lower() in canais and conexao.nome.lower() in canais[destinatario.lower()]:
